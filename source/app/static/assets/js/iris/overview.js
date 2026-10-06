@@ -2,9 +2,15 @@ $.each($.find("table"), function(index, element){
     addFilterFields($(element).attr("id"));
 });
 let OverviewTable = $("#overview_table").DataTable({
-    dom: '<"container-fluid"<"row"<"col"l><"col"f>>>rt<"container-fluid"<"row"<"col"i><"col"p>>>',
-    aaData: [],
+    dom: 'B<"container-fluid"<"row"<"col"l><"col"f>>>rt<"container-fluid"<"row"<"col"i><"col"p>>>',
+    serverSide: true,
+    deferRender: true,
+    searchDelay: 350,
+    ajax: load_overview_page,
     columnDefs: [
+        { targets: [0, 2, 3, 4, 5, 6, 7, 11], searchBuilderType: 'string' },
+        { targets: [1, 8, 10], searchBuilderType: 'num' },
+        { targets: [9], searchBuilderType: 'date' },
         {
             targets: [0], // column index
             visible: false, // set visibility
@@ -253,10 +259,10 @@ let OverviewTable = $("#overview_table").DataTable({
         }
       }
     },
-    order: [[ 7, "asc" ]],
+    order: [[ 1, "desc" ]],
     buttons: [
-        { "extend": 'csvHtml5', "text":'Export',"className": 'btn btn-primary btn-border btn-round btn-sm float-left mr-4 mt-2' },
-        { "extend": 'copyHtml5', "text":'Copy',"className": 'btn btn-primary btn-border btn-round btn-sm float-left mr-4 mt-2' },
+        { "extend": 'csvHtml5', "text":'Export filtered', action: export_overview,"className": 'btn btn-primary btn-border btn-round btn-sm float-left mr-4 mt-2' },
+        { "extend": 'copyHtml5', "text":'Copy page',"className": 'btn btn-primary btn-border btn-round btn-sm float-left mr-4 mt-2' },
     ],
     responsive: {
         details: {
@@ -267,7 +273,7 @@ let OverviewTable = $("#overview_table").DataTable({
     select: true,
     orderCellsTop: true,
     initComplete: function () {
-            tableFiltering(this.api(), 'overview_table');
+            overview_column_filters(this.api());
         },
     drawCallback: function () {
             $('.btn-quick-view').off('click').on('click', function() {
@@ -277,32 +283,92 @@ let OverviewTable = $("#overview_table").DataTable({
     });
 
 OverviewTable.searchBuilder.container().appendTo($('#table_buttons'));
+OverviewTable.buttons().container().appendTo($('#table_buttons'));
 
-function get_cases_overview(silent, show_full=false) {
-    show_loader();
-    show_full = show_full || $('#overviewLoadClosedCase').prop('checked');
-
-     $('#overviewTableTitle').text(show_full ? 'All cases' : 'Open cases');
-
-    get_raw_request_api('/overview/filter?cid=' + get_caseid() + (show_full ? '&show_closed=true' : ''))
-    .done((data) => {
-        if(notify_auto_api(data, silent)) {
-            overview_list = data.data;
-            OverviewTable.clear();
-            OverviewTable.rows.add(overview_list);
-            OverviewTable.columns.adjust().draw();
-            $(".truncate").on("click", function() {
-                var index = $(this).index() + 1;
-                $('table tr td:nth-child(' + index  + ')').toggleClass("truncate");
-            });
-
-            hide_loader();
-        }
+// A failed request must release both the page loader and DataTables processing UI.
+var overview_request;
+function load_overview_page(request, callback) {
+    request.show_closed = $('#overviewLoadClosedCase').prop('checked') ? 'true' : 'false';
+    request.builder = JSON.stringify(request.searchBuilder || {});
+    delete request.searchBuilder;
+    if (request.builder === '{}') delete request.builder;
+    if (overview_request) overview_request.abort();
+    overview_request = $.ajax({
+        url: '/overview/page', data: request, dataType: 'json',
+        success: callback,
+        error: function(xhr, status) {
+            if (status === 'abort') return;
+            notify_error(xhr.responseJSON?.message || 'Unable to load case overview');
+            callback({draw: request.draw, recordsTotal: 0, recordsFiltered: 0, data: []});
+        },
+        complete: function() { hide_loader(); }
     });
 }
 
+function overview_column_filters(api) {
+    api.columns().every(function(index) {
+        let column = this;
+        let cell = $('#overview_table .filters th').eq($(column.header()).index());
+        let timer;
+        let input = $('<input type="search" class="form-control" placeholder="Filter">');
+        cell.empty().append(input);
+        input.on('input change', function(event) {
+            event.stopPropagation();
+            clearTimeout(timer);
+            timer = setTimeout(function() {
+                column.search(input.val(), false, false).draw();
+            }, 350);
+        });
+    });
+}
+
+function get_cases_overview() {
+    $('#overviewTableTitle').text($('#overviewLoadClosedCase').prop('checked') ? 'All cases' : 'Open cases');
+    OverviewTable.ajax.reload();
+}
+
+// Export is explicit: opening Overview never downloads all cases.
+async function export_overview(event, table, button) {
+    let control = table.button(button);
+    control.enable(false);
+    try {
+        let request = $.extend(true, {}, table.ajax.params());
+        let result = await $.ajax({url: '/overview/export', data: request, dataType: 'json'});
+        let rows = result.data;
+        const header = ['Case ID', 'Title', 'SOC ID', 'Customer', 'Severity', 'Classification',
+                        'State', 'Outcome', 'Tags', 'Open date', 'Owner', 'Open tasks', 'Closed tasks'];
+        const csv = value => {
+            let text = String(value ?? '');
+            // Spreadsheet formula injection protection for case/tag/user text.
+            if (/^[=+@\-\t\r\n]/.test(text)) text = "'" + text;
+            return '"' + text.replace(/"/g, '""') + '"';
+        };
+        let lines = [header, ...rows.map(row => [row.case_id, row.name, row.soc_id,
+            row.client?.customer_name, row.severity?.severity_name, row.classification?.name,
+            row.state?.state_name, row.status_name, row.tags.map(tag => tag.tag_title).join(', '),
+            row.open_date, row.owner?.user_name, row.tasks_status?.open_tasks, row.tasks_status?.closed_tasks])];
+        let blob = new Blob(['\ufeff' + lines.map(row => row.map(csv).join(',')).join('\r\n')], {type:'text/csv;charset=utf-8'});
+        $.fn.dataTable.fileSave(blob, 'iris-overview.csv');
+    } catch (error) {
+        notify_error(error.responseJSON?.message || 'Unable to export case overview');
+    } finally {
+        control.enable(true);
+    }
+}
+
+let overview_preview_request = null;
 function show_case_view(row_index) {
-    let case_data = OverviewTable.row(row_index).data();
+    let summary = OverviewTable.row(row_index).data();
+    if (overview_preview_request) overview_preview_request.abort();
+    overview_preview_request = get_raw_request_api('/case/meta?cid=' + summary.case_id)
+        .done(function(response) {
+            if (notify_auto_api(response, true)) {
+                render_case_view({...response.data, tasks_status: summary.tasks_status});
+            }
+        });
+}
+
+function render_case_view(case_data) {
     $('#caseViewModal').find('.modal-title').text(case_data.name);
     $('#caseViewModal').find('.modal-subtitle').text(case_data.case_uuid);
 
@@ -435,11 +501,11 @@ function show_case_view(row_index) {
 
 $(document).ready(function() {
     show_loader();
-    get_cases_overview(true);
+    // DataTables starts its initial request during construction.
 
 
     $('#overviewLoadClosedCase').change(function() {
-        get_cases_overview(true, this.checked);
+        get_cases_overview();
     });
 
 });

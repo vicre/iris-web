@@ -1,0 +1,6 @@
+# Small, reproducible application patch on the deployed IRIS release.
+FROM ghcr.io/dfir-iris/iriswebapp_app:v2.4.29
+COPY source/app/datamgmt/overview/overview_db.py source/app/datamgmt/overview/overview_table.py /iriswebapp/app/datamgmt/overview/
+COPY source/app/blueprints/overview/overview_routes.py /iriswebapp/app/blueprints/overview/
+COPY source/app/blueprints/overview/templates/overview.html /iriswebapp/app/blueprints/overview/templates/
+COPY source/app/static/assets/js/iris/overview.js /iriswebapp/app/static/assets/js/iris/

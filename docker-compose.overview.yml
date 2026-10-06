@@ -1,0 +1,9 @@
+# Use with docker-compose.yml. No database, credentials, or port changes.
+services:
+  app:
+    image: iriswebapp_app:v2.4.29-overview.1
+    build:
+      context: .
+      dockerfile: docker/webApp/Dockerfile.overview
+  worker:
+    image: iriswebapp_app:v2.4.29-overview.1

@@ -16,17 +16,18 @@
 #  along with this program; if not, write to the Free Software Foundation,
 #  Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 
-from flask import Blueprint, request
+from flask import Blueprint, request, jsonify
 from flask import render_template
 from flask import url_for
 from flask_login import current_user
 from flask_wtf import FlaskForm
 from werkzeug.utils import redirect
 
-from app.datamgmt.overview.overview_db import get_overview_db
+from app.datamgmt.overview.overview_db import get_overview_db, get_overview_page, get_overview_export
 from app.util import ac_api_requires
 from app.util import ac_requires
 from app.util import response_success
+from app.util import response_error
 
 overview_blueprint = Blueprint(
     'overview',
@@ -59,3 +60,21 @@ def get_overview_filter():
     overview = get_overview_db(current_user.id, show_full)
 
     return response_success('', data=overview)
+
+
+@overview_blueprint.route('/overview/page', methods=['GET'])
+@ac_api_requires()
+def get_overview_page_route():
+    try:
+        return jsonify(get_overview_page(current_user.id, request.args))
+    except ValueError as error:
+        return response_error(str(error))
+
+
+@overview_blueprint.route('/overview/export', methods=['GET'])
+@ac_api_requires()
+def get_overview_export_route():
+    try:
+        return jsonify(get_overview_export(current_user.id, request.args))
+    except ValueError as error:
+        return response_error(str(error))
