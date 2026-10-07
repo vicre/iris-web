@@ -183,3 +183,34 @@ existing authenticated administrator HTTP request to the running app returned
 200, 25 rows, the correct total of 7,575 visible open cases, and a 13,893-byte
 response in 0.073 seconds. Nginx is healthy. The local worker remains stopped;
 production was not modified.
+
+## Unassigned-case visibility fix — 2026-10-07
+
+Production incident 211166 already had IRIS case 7423, but searching Overview
+returned no match. The case had no assigned owner, matching Defender. The shared
+Overview query used an inner join to the owner table, which excluded every
+unassigned case before searching, counting, pagination, or export.
+
+The query now uses a left outer join for the optional owner. Customer membership
+and effective case-access checks are unchanged. This restores unassigned cases
+in the paginated Overview, export, and legacy Overview endpoint without assigning
+an artificial owner or changing case data. Closed cases still require the
+existing show-closed option.
+
+The PostgreSQL fixtures now include unassigned open and closed cases, an explicit
+access denial, and cases belonging to another user's access set. The regression
+checks search, export, legacy results, owner serialization, and access isolation.
+The unchanged counts in the existing tests also catch missing unassigned cases.
+The added fixture reproduces the failure before the query fix; all 13 PostgreSQL
+regression tests pass with the fix.
+
+The quick-preview renderer also accepts a null owner and displays `Unassigned`;
+previously it dereferenced the missing owner and failed before opening the modal.
+The script URL version is advanced so browsers fetch the corrected renderer.
+Run `node tests/overview/test_preview.js` to exercise the real renderer with both
+assigned and unassigned synthetic cases (Node.js 18+; no packages required).
+
+The Compose overlay uses `iriswebapp_app:v2.4.29-overview.2` for app and worker so
+the previous image remains available for rollback. Preserve the deployment's
+private credentials overlay when applying or reverting this patch; use its
+configured `COMPOSE_FILE` from the production `.env`.

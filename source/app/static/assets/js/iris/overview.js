@@ -419,7 +419,7 @@ function render_case_view(case_data) {
 
     let owner_dl1 = $('<dl class="row"/>');
     owner_dl1.append($('<dt class="col-sm-3"/>').text('Owner:'));
-    owner_dl1.append($('<dd class="col-sm-8"/>').text(case_data.owner.user_name));
+    owner_dl1.append($('<dd class="col-sm-8"/>').text(case_data.owner?.user_name || 'Unassigned'));
     owner_dl1.append($('<dt class="col-sm-3"/>').text('Opening User:'));
     owner_dl1.append($('<dd class="col-sm-8"/>').text(case_data.user.user_name));
     owner_dl1.append($('<dt class="col-sm-3"/>').text('Open Date:'));

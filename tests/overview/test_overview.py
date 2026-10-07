@@ -44,6 +44,7 @@ class OverviewTests(unittest.TestCase):
                           repeat('Large summary ', 1000) FROM generate_series(1,65) n''',
                 "UPDATE cases SET close_date=CURRENT_DATE,state_id=2 WHERE case_id=61",
                 "UPDATE cases SET name='Literal 100%_match' WHERE case_id=60",
+                "UPDATE cases SET owner_id=NULL WHERE case_id IN (59,61,62,63,65)",
                 '''INSERT INTO user_case_effective_access (user_id,case_id,access_level)
                    SELECT 1,n,2 FROM generate_series(1,61) n''',
                 "INSERT INTO user_case_effective_access (user_id,case_id,access_level) VALUES (1,62,1),(2,65,4)",
@@ -98,6 +99,21 @@ class OverviewTests(unittest.TestCase):
         self.assertEqual(self.page(**{'columns[7][search][value]':'phishing'})['recordsFiltered'],1)
         result=self.page(**{'order[0][column]':'1','order[0][dir]':'asc'})
         self.assertEqual(result['data'][0]['case_id'],1)
+
+    def test_unassigned_cases_are_searchable_without_widening_access(self):
+        result = self.page(**{'search[value]': 'XDR-59'})
+        self.assertEqual(result['recordsFiltered'], 1)
+        self.assertEqual([row['case_id'] for row in result['data']], [59])
+        self.assertIsNone(result['data'][0]['owner'])
+        self.assertEqual(self.page(**{'search[value]': 'XDR-61'})['recordsFiltered'], 0)
+        closed = self.page(show_closed='true', **{'search[value]': 'XDR-61'})
+        self.assertEqual([row['case_id'] for row in closed['data']], [61])
+        for identifier in (62, 63, 65):
+            with self.subTest(inaccessible_case=identifier):
+                self.assertEqual(self.page(**{'search[value]': f'XDR-{identifier}'})['recordsFiltered'], 0)
+        export = overview_db.get_overview_export(1, {'search[value]': 'XDR-59'})
+        self.assertEqual([row['case_id'] for row in export['data']], [59])
+        self.assertIn(59, [row['case_id'] for row in overview_db.get_overview_db(1, False)])
 
     def test_advanced_filters_and_no_duplicate_rows_for_multiple_tags(self):
         rule={'logic':'AND','criteria':[

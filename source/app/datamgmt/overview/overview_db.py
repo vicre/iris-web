@@ -42,7 +42,8 @@ def accessible_cases(user_id, show_full):
         UserCaseEffectiveAccess.user_id == user_id,
         UserCaseEffectiveAccess.access_level != CaseAccessLevel.deny_all.value,
     )
-    query = Cases.query.filter(Cases.case_id.in_(allowed)).join(Cases.owner).join(Cases.client)
+    # Defender incidents can be unassigned; ownership must not determine visibility.
+    query = Cases.query.filter(Cases.case_id.in_(allowed)).outerjoin(Cases.owner).join(Cases.client)
     return query if show_full else query.filter(Cases.close_date.is_(None))
 
 
